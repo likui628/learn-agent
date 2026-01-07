@@ -13,7 +13,10 @@ due to weaker reasoning and less strict adherence to tool results in structured 
 """
 model = OpenRouterModel(
     'openai/gpt-4o-mini',
-    provider=OpenRouterProvider(api_key=os.getenv('OPENROUTER_API_KEY')),
+    provider=OpenRouterProvider(
+        api_key=os.getenv('OPENROUTER_API_KEY'),
+        app_url='https://github.com/likui628/pydantic-ai-examples',
+        app_title='Pydantic AI examples',),
 )
 
 
