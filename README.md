@@ -24,10 +24,10 @@ OPENROUTER_API_KEY=your_openrouter_api_key
 
 ## How to Run
 
-Run the main example:
+Run the example:
 
 ```bash
-uv run -m main
+uv run -m examples.<example_module_name>
 ```
 
 ## Dependencies
