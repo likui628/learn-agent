@@ -1,4 +1,4 @@
-# Pydantic AI Examples
+# Learn Agent
 
 A demonstration project showcasing the use of Pydantic AI for building AI-powered applications.
 
@@ -9,8 +9,8 @@ Ensure you have Python 3.14+ installed. This project uses `uv` for dependency ma
 Clone the repository and install dependencies:
 
 ```bash
-git clone <repository-url>
-cd pydantic-ai-examples
+git clone https://github.com/likui628/learn-agent
+cd learn-agent
 uv sync
 ```
 
@@ -27,7 +27,7 @@ OPENROUTER_API_KEY=your_openrouter_api_key
 Run the example:
 
 ```bash
-uv run -m examples.<example_module_name>
+uv run -m <module>.<example_module_name>
 ```
 
 ## Models
