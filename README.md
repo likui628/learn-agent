@@ -27,19 +27,5 @@ OPENROUTER_API_KEY=your_openrouter_api_key
 Run the example:
 
 ```bash
-uv run -m <module>.<example_module_name>
+uv run -m agents.s01_agent_loop
 ```
-
-## Models
-| Model | Price (Input/Output) | Note |
-| --- | --- | --- |
-| anthropic/claude-3-haiku | 0.25/1.25 | |
-| openai/gpt-4o-mini | 0.15/0.60 |  |
-| xiaomi/mimo-v2-flash:free | - | Did not support tool_choice for structured outputs |
-| mistralai/devstral-2512:free | - |  |
-| anthropic/claude-haiku-4.5 | 1.00/5.00 |  |
-| google/gemini-2.5-flash-lite | 0.10/0.40|  Agentic stability is slightly inferior to Claude/GPT. |
-## Dependencies
-
-- pydantic-ai: Core AI framework
-- python-dotenv: Environment variable management
