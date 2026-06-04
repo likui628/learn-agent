@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import time
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -27,9 +28,11 @@ WORKDIR = Path.cwd()
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 MODEL = os.environ.get("MODEL_ID", "anthropic/claude-haiku-4.5")
 
+CONTEXT_LIMIT = 50000
 PERSIST_THRESHOLD = 30000
 KEEP_RECENT_TOOL_RESULTS = 3
 PREVIEW_CHARS = 2000
+TRANSCRIPT_DIR = WORKDIR / ".transcripts"
 TOOL_RESULTS_DIR = WORKDIR / ".task_outputs" / "tool-results"
 
 
@@ -38,6 +41,10 @@ class CompactState:
     has_compacted: bool = False
     last_summary: str = ""
     recent_files: list[str] = field(default_factory=list)
+
+
+def estimate_context_size(messages: list) -> int:
+    return len(str(messages))
 
 
 def safe_path(path_str: str) -> Path:
@@ -105,6 +112,57 @@ def micro_compact(messages: list) -> list:
             continue
         target["content"] = "[Earlier tool result compacted. Re-run the tool if you need full detail.]"
     return messages
+
+
+def write_transcript(messages: list) -> Path:
+    TRANSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
+    path = TRANSCRIPT_DIR / f"transcript_{int(time.time())}.jsonl"
+    with path.open("w") as handle:
+        for message in messages:
+            handle.write(json.dumps(message, default=str) + "\n")
+    return path
+
+
+def summarize_history(messages: list) -> str:
+    conversation = json.dumps(messages, default=str)[:80000]
+    prompt = (
+        "Summarize this coding-agent conversation so work can continue.\n"
+        "Preserve:\n"
+        "1. The current goal\n"
+        "2. Important findings and decisions\n"
+        "3. Files read or changed\n"
+        "4. Remaining work\n"
+        "5. User constraints and preferences\n"
+        "Be compact but concrete.\n\n"
+        f"{conversation}"
+    )
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=2000,
+    )
+    return (response.choices[0].message.content or "").strip()
+
+
+# Save the full transcript, summarize it, and replace history with a compact continuation.
+def compact_history(messages: list, state: CompactState, focus: str | None = None) -> list:
+    transcript_path = write_transcript(messages)
+    print(f"[transcript saved: {transcript_path}]")
+    summary = summarize_history(messages)
+    if focus:
+        summary += f"\n\nFocus to preserve next: {focus}"
+    if state.recent_files:
+        recent_lines = "\n".join(f"- {path}" for path in state.recent_files)
+        summary += f"\n\nRecent files to reopen if needed:\n{recent_lines}"
+    state.has_compacted = True
+    state.last_summary = summary
+    return [{
+        "role": "user",
+        "content": (
+            "This conversation was compacted so the agent can continue working.\n\n"
+            f"{summary}"
+        ),
+    }]
 
 
 def run_bash(command: str, tool_use_id: str) -> str:
@@ -276,7 +334,12 @@ SYSTEM = (
 
 def agent_loop(messages: list, state: CompactState) -> None:
     while True:
-        messages = micro_compact(messages)
+        messages[:] = micro_compact(messages)
+
+        if estimate_context_size(messages) > CONTEXT_LIMIT:
+            print("[auto compact]")
+            messages[:] = compact_history(messages, state)
+
         response = client.chat.completions.create(
             model=MODEL,
             messages=[{"role": "system", "content": SYSTEM}] + messages,
@@ -291,14 +354,33 @@ def agent_loop(messages: list, state: CompactState) -> None:
         })
         if response.choices[0].finish_reason != "tool_calls":
             return
+        compact_call = None
+        compact_focus = None
+        for tc in msg.tool_calls:
+            if tc.function.name == "compact":
+                args = json.loads(tc.function.arguments)
+                compact_call = tc
+                compact_focus = args.get("focus")
+                break
+
+        if compact_call:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": compact_call.id,
+                "content": "Compacting conversation...",
+            })
+            print("[manual compact]")
+            messages[:] = compact_history(messages, state, focus=compact_focus)
+            return
+       
         results = []
         for tc in msg.tool_calls:
             args = json.loads(tc.function.arguments)
             output = execute_tool(tc.function.name, args, state, tc.id)
             results.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": str(output),
+               "role": "tool",
+               "tool_call_id": tc.id,
+               "content": str(output),
             })
         messages.extend(results)
 
