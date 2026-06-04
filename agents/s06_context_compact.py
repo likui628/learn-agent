@@ -28,6 +28,7 @@ OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 MODEL = os.environ.get("MODEL_ID", "anthropic/claude-haiku-4.5")
 
 PERSIST_THRESHOLD = 30000
+KEEP_RECENT_TOOL_RESULTS = 3
 PREVIEW_CHARS = 2000
 TOOL_RESULTS_DIR = WORKDIR / ".task_outputs" / "tool-results"
 
@@ -54,6 +55,7 @@ def track_recent_file(state: CompactState, path: str) -> None:
         state.recent_files[:] = state.recent_files[-5:]
 
 
+# Store large tool outputs on disk and return a short preview to keep context small.
 def persist_large_output(tool_use_id: str, output: str) -> str:
     if len(output) <= PERSIST_THRESHOLD:
         return output
@@ -71,6 +73,38 @@ def persist_large_output(tool_use_id: str, output: str) -> str:
         f"{preview}\n"
         "</persisted-output>"
     )
+
+
+def collect_tool_results(messages: list) -> list[tuple[int, int | None]]:
+    results = []
+    for message_index, message in enumerate(messages):
+        if message.get("role") == "tool" and isinstance(message.get("content"), str):
+            results.append((message_index, None))
+            continue
+
+        content = message.get("content")
+        if message.get("role") != "user" or not isinstance(content, list):
+            continue
+        for block_index, block in enumerate(content):
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                results.append((message_index, block_index))
+    return results
+
+
+# Replace older tool results with compact placeholders, keeping only recent calls intact.
+def micro_compact(messages: list) -> list:
+    tool_results = collect_tool_results(messages)
+    if (len(tool_results) <= KEEP_RECENT_TOOL_RESULTS):
+        return messages
+
+    for message_index, block_index in tool_results[:-KEEP_RECENT_TOOL_RESULTS]:
+        message = messages[message_index]
+        target = message if block_index is None else message["content"][block_index]
+        content = target.get("content", "")
+        if not isinstance(content, str) or len(content) <= 120:
+            continue
+        target["content"] = "[Earlier tool result compacted. Re-run the tool if you need full detail.]"
+    return messages
 
 
 def run_bash(command: str, tool_use_id: str) -> str:
@@ -242,6 +276,7 @@ SYSTEM = (
 
 def agent_loop(messages: list, state: CompactState) -> None:
     while True:
+        messages = micro_compact(messages)
         response = client.chat.completions.create(
             model=MODEL,
             messages=[{"role": "system", "content": SYSTEM}] + messages,
